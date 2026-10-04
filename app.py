@@ -210,15 +210,101 @@ def reject(excuse: str) -> None:
     ss.rejected = ss.rejected + [excuse]
 
 
+# 콜! / 핑계 대기 버튼. 핑계 대기는 ESCAPES번 도망간 뒤에야 잡힌다.
+ESCAPES = 4
+
+INTRO_HTML = """
+<div class="arena">
+  <button class="call">콜! 🍻</button>
+  <button class="excuse">핑계 대기 😩</button>
+  <div class="tease"></div>
+</div>
+"""
+
+INTRO_CSS = """
+.arena { position: relative; height: 210px; width: 100%; user-select: none; font-family: 'Gowun Dodum', sans-serif; }
+button {
+  position: absolute; top: 45%; transform: translate(-50%, -50%);
+  padding: .65em 1.4em; font-size: 1.1rem; white-space: nowrap; cursor: pointer;
+  border: 2px solid #3b2f2a; border-radius: 6px; box-shadow: 3px 3px 0 #3b2f2a;
+  font-family: inherit;
+}
+.call { left: 30%; background: #c0392b; color: #fff; z-index: 2; }
+.excuse {
+  left: 70%; background: #fffaf0; color: #3b2f2a; z-index: 1;
+  transition: left .22s ease, top .22s ease;
+}
+button:active { box-shadow: 1px 1px 0 #3b2f2a; }
+.tease {
+  position: absolute; bottom: 0; width: 100%; text-align: center;
+  color: #3b2f2a; font-size: 1rem; min-height: 1.4em;
+}
+@media (max-width: 480px) {
+  button { font-size: 1rem; padding: .6em 1.1em; }
+  .call { left: 26%; }
+  .excuse { left: 72%; }
+}
+"""
+
+INTRO_JS = """
+export default function (component) {
+  const { parentElement, setTriggerValue } = component;
+  const arena = parentElement.querySelector('.arena');
+  const call = parentElement.querySelector('.call');
+  const excuse = parentElement.querySelector('.excuse');
+  const tease = parentElement.querySelector('.tease');
+  const MAX = %d;
+  const lines = ['핑계는 잡히지도 않네 ㅋ 🏃', '어딜 도망가려고~ 😏', '한 번만 더 해봐 🙃', '...그래, 들어나 보자 🙄'];
+  let escapes = 0;
+
+  const runAway = (e) => {
+    if (escapes >= MAX) return false;
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    const w = arena.clientWidth, h = arena.clientHeight;
+    const bw = excuse.offsetWidth, bh = excuse.offsetHeight;
+    const ar = arena.getBoundingClientRect(), cr = call.getBoundingClientRect(), nr = excuse.getBoundingClientRect();
+    const pt = e && e.touches ? e.touches[0] : e;
+    const px = pt && pt.clientX != null ? pt.clientX - ar.left : nr.left - ar.left + nr.width / 2;
+    const py = pt && pt.clientY != null ? pt.clientY - ar.top : nr.top - ar.top + nr.height / 2;
+    const overlapsCall = (x, y) =>
+      Math.abs(x - (cr.left - ar.left + cr.width / 2)) < (bw + cr.width) / 2 + 10 &&
+      Math.abs(y - (cr.top - ar.top + cr.height / 2)) < (bh + cr.height) / 2 + 10;
+    let x, y, tries = 0;
+    do {
+      x = bw / 2 + Math.random() * Math.max(1, w - bw);
+      y = bh / 2 + Math.random() * Math.max(1, h - bh - 30);
+      tries++;
+    } while (tries < 60 && (overlapsCall(x, y) || Math.hypot(x - px, y - py) < Math.min(140, w / 3)));
+    excuse.style.left = x + 'px';
+    excuse.style.top = y + 'px';
+    tease.textContent = lines[Math.min(escapes, lines.length - 1)];
+    escapes++;
+    return true;
+  };
+
+  excuse.addEventListener('mouseenter', runAway);
+  excuse.addEventListener('touchstart', (e) => { runAway(e); }, { passive: false });
+  excuse.addEventListener('click', (e) => {
+    if (!runAway(e)) setTriggerValue('action', 'excuse');
+  });
+  call.addEventListener('click', () => setTriggerValue('action', 'call'));
+}
+""" % ESCAPES
+
+intro_buttons = st.components.v2.component("today_play_intro", html=INTRO_HTML, css=INTRO_CSS, js=INTRO_JS)
+
+
 def page_intro() -> None:
     st.html('<div class="eyebrow">— TODAY\'S MENU —</div>')
     st.markdown("# 오늘 뭐하고 놀래? 🍻")
     with st.container(border=True, key="card_0"):
         st.html('<p class="hand">오늘 놀 사람? 🙋</p>')
         if not ss.excuse_mode:
-            left, right = st.columns(2)
-            left.button("콜! 🍻", on_click=go, args=(1,), type="primary", width="stretch")
-            if right.button("핑계 대기 😩", width="stretch"):
+            result = intro_buttons(key="intro", on_action_change=lambda: None)
+            if result.action == "call":
+                go(1)
+                st.rerun()
+            elif result.action == "excuse":
                 ss.excuse_mode = True
                 st.rerun()
             return
