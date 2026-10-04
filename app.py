@@ -7,7 +7,6 @@ from html import escape
 import streamlit as st
 
 from menu import (
-    AREAS,
     CAFE_CONCEPTS,
     CAFE_DRINKS,
     COURSE_TYPES,
@@ -49,12 +48,9 @@ DEFAULTS = {
     "home_msg": "",
     "home_score": -1,  # 얼마나 늦게 가는지 (클수록 늦게)
     "p_people": 2,
-    "p_invite": "",
     "p_meet": MEET_TIMES[1],
     "p_meet_custom": dt.time(19, 0),
     "p_home_custom": dt.time(23, 0),
-    "p_area": None,
-    "p_custom_areas": [],
     "p_budget": 3,
     "p_pay": PAY_WAYS[0],
 }
@@ -282,20 +278,24 @@ def choose_custom_home() -> None:
     choose_home(hour_label(t.hour, t.minute), t.hour, t.minute)
 
 
+def use_custom_meet() -> None:
+    ss.p_meet = CUSTOM_TIME
+
+
 def page_info() -> None:
     header()
     st.markdown("## 📋 기본 정보")
     with st.container(border=True, key="card_1"):
-        c1, c2 = st.columns([1, 2])
-        c1.number_input("몇 명이서?", min_value=2, max_value=20, step=1, key="p_people")
-        c2.text_input("더 부를 친구 있어?", placeholder="예) 민수, 지영", max_chars=40, key="p_invite")
+        st.number_input("몇 명이서?", min_value=2, max_value=20, step=1, key="p_people")
 
         st.radio("몇 시에 볼까?", MEET_TIMES + [CUSTOM_TIME], horizontal=True, key="p_meet")
-        if ss.p_meet == CUSTOM_TIME:
-            st.time_input("만날 시간", step=dt.timedelta(minutes=10), key="p_meet_custom")
-
-        st.pills("어디서?", AREAS + ss.p_custom_areas, key="p_area")
-        custom_input("✏️ 다른 동네", "예) 망원, 연남", "new_area", "p_custom_areas", "p_area", multi=False)
+        # 항상 보이게: 시간을 바꾸면 자동으로 '직접 정하기'가 선택된다
+        st.time_input(
+            "⏰ 직접 정하기 (바꾸면 이 시간으로)",
+            step=dt.timedelta(minutes=10),
+            key="p_meet_custom",
+            on_change=use_custom_meet,
+        )
 
     with st.container(border=True, key="card_2"):
         st.html('<p class="hand">🏠 집에는 몇 시에 갈 거야?</p>')
@@ -317,7 +317,7 @@ def page_info() -> None:
                 f"{wanted}<b>{escape(ss.home)}</b></div>"
                 f'<p class="hand" style="font-size:1.4rem">{escape(ss.home_msg)}</p>'
             )
-    nav(next_disabled=not (ss.p_area and ss.home))
+    nav(next_disabled=not ss.home)
 
 
 # ---------------------------------------------------------------------------
@@ -468,11 +468,10 @@ def meet_text() -> str:
 
 def summary_lines() -> list[str]:
     today = dt.datetime.now(KST).date()
-    head = f"👥 {ss.p_people}명" + (f" (+{ss.p_invite.strip()})" if ss.p_invite.strip() else "")
     home = ss.home + (f" ({ss.home_wanted}에 가려다 기각 ㅋ)" if ss.home_wanted else "")
     lines = [
         "🍻 오늘의 주문서 🍻",
-        f"📅 {today.month}/{today.day}({'월화수목금토일'[today.weekday()]}) · {head} · 📍 {ss.p_area}",
+        f"📅 {today.month}/{today.day}({'월화수목금토일'[today.weekday()]}) · 👥 {ss.p_people}명",
         f"⏰ {meet_text()} 만남 → 🏠 {home}",
         "",
     ]
@@ -502,15 +501,13 @@ def receipt_html() -> str:
                     f'<div class="row"><span>{escape(item)}</span><span class="fill"></span>'
                     f'<span class="price">{escape(price)}</span></div>'
                 )
-    invite = f" (+{escape(ss.p_invite.strip())})" if ss.p_invite.strip() else ""
     home = escape(ss.home) + (f' <span class="small">({escape(ss.home_wanted)} 기각)</span>' if ss.home_wanted else "")
     return f"""
 <div class="receipt">
   <div class="center"><h3>🍻 오늘의 주문서</h3>
   <div class="small">{today:%Y-%m-%d %H:%M} · No.{random.randint(1000, 9999)}</div></div>
   <hr>
-  <div class="row"><span>📍 장소</span><span class="fill"></span><span>{escape(ss.p_area)}</span></div>
-  <div class="row"><span>👥 인원</span><span class="fill"></span><span>{ss.p_people}명{invite}</span></div>
+  <div class="row"><span>👥 인원</span><span class="fill"></span><span>{ss.p_people}명</span></div>
   <div class="row"><span>⏰ 만남</span><span class="fill"></span><span>{escape(meet_text())}</span></div>
   <div class="row"><span>🏠 귀가</span><span class="fill"></span><span>{home}</span></div>
   <hr>
