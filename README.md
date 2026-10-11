@@ -1,5 +1,7 @@
 # 🍻 오늘 뭐하고 놀래?
 
+**🔗 바로 실행해 보기:** https://today-play-nzkcy3s6yewpae9ywjqjne.streamlit.app
+
 친구한테 링크 보내면, 친구가 **레트로 메뉴판**에서 오늘 놀 코스를 직접 주문하는 Streamlit 앱.
 
 ## 흐름
