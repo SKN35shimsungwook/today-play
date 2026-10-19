@@ -53,6 +53,7 @@ DEFAULTS = {
     "p_home_custom": dt.time(23, 0),
     "p_budget": 3,
     "p_pay": PAY_WAYS[0],
+    "skipped": [],  # 건너뛴 단계 이름 (영수증에 '만나서 정하자'로 표시)
 }
 for _k, _v in DEFAULTS.items():
     ss.setdefault(_k, list(_v) if isinstance(_v, list) else _v)
@@ -64,6 +65,26 @@ def steps() -> list[str]:
 
 def go(step: int) -> None:
     ss.step = max(0, min(step, len(steps()) - 1))
+
+
+UNDECIDED = "만나서 정하자 🤔"
+
+
+def is_skipped(name: str) -> bool:
+    return name in ss.skipped
+
+
+def go_next(name: str) -> None:
+    """다음: 이 단계는 정한 것으로 보고 건너뛰기 표시를 지운다."""
+    ss.skipped = [x for x in ss.skipped if x != name]
+    go(ss.step + 1)
+
+
+def skip(name: str) -> None:
+    if name not in ss.skipped:
+        ss.skipped = ss.skipped + [name]
+    # 코스를 건너뛰면 차수별 메뉴판도 볼 필요가 없으니 예산으로 바로 간다
+    go(steps().index("budget") if name == "course" else ss.step + 1)
 
 
 def restart() -> None:
@@ -171,10 +192,11 @@ def header() -> None:
     st.html(f'<div class="eyebrow">— STEP {ss.step + 1} / {len(names)} —</div>')
 
 
-def nav(next_disabled: bool = False, next_label: str = "다음 →") -> None:
-    left, right = st.columns(2)
+def nav(name: str, next_disabled: bool = False, next_label: str = "다음 →") -> None:
+    left, mid, right = st.columns(3)
     left.button("← 이전", on_click=go, args=(ss.step - 1,), width="stretch")
-    right.button(next_label, on_click=go, args=(ss.step + 1,), type="primary", disabled=next_disabled, width="stretch")
+    mid.button("건너뛰기 ⏭️", key=f"skip_{name}", on_click=skip, args=(name,), width="stretch")
+    right.button(next_label, on_click=go_next, args=(name,), type="primary", disabled=next_disabled, width="stretch")
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +425,8 @@ def page_info() -> None:
                 f"{wanted}<b>{escape(ss.home)}</b></div>"
                 f'<p class="hand" style="font-size:1.4rem">{escape(ss.home_msg)}</p>'
             )
-    nav(next_disabled=not ss.home)
+    st.caption("건너뛰면 귀가는 자동으로 🌅 첫차야 😎")
+    nav("info", next_disabled=not ss.home)
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +473,7 @@ def page_course() -> None:
         left.button("↩️ 하나 빼기", on_click=pop_course, disabled=not ss.course, width="stretch")
         right.button("🗑️ 다시 짜기", on_click=clear_course, disabled=not ss.course, width="stretch")
         st.caption("같은 것도 여러 번 넣을 수 있어. 2차 술 → 3차 술 → 4차 술도 가능 🍺")
-    nav(next_disabled=not ss.course)
+    nav("course", next_disabled=not ss.course)
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +545,7 @@ def page_menu(i: int) -> None:
         chosen = [x for v in picks(i).values() for x in v]
         if chosen:
             st.html(f'<p class="hand" style="font-size:1.4rem">🧾 {escape(", ".join(chosen))}</p>')
-    nav(next_disabled=not picks(i))
+    nav(p, next_disabled=not picks(i))
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +562,7 @@ def page_budget() -> None:
         st.slider("1인 예산 (만원)", 1, 10, key="p_budget", format="%d만원")
         st.html(f'<p class="hand">1인 {escape(budget_text())}</p>')
         st.radio("계산은?", PAY_WAYS, horizontal=True, key="p_pay")
-    nav(next_label="주문서 뽑기 🧾")
+    nav("budget", next_label="주문서 뽑기 🧾")
 
 
 # ---------------------------------------------------------------------------
@@ -552,22 +575,57 @@ def meet_text() -> str:
     return hour_label(t.hour, t.minute)
 
 
+SKIPPED_HOME = "🌅 첫차"
+SKIPPED_HOME_NOTE = "건너뛰면 자동 첫차 ㅋ"
+
+
+def info_texts() -> tuple[str, str, str, str | None]:
+    """(인원, 만남, 귀가, 기각된 귀가). 기본 정보를 건너뛰면 귀가는 무조건 첫차."""
+    if is_skipped("info"):
+        return UNDECIDED, UNDECIDED, SKIPPED_HOME, None
+    return f"{ss.p_people}명", meet_text(), ss.home or SKIPPED_HOME, ss.home_wanted
+
+
+def course_items(i: int) -> dict[str, list[str]]:
+    """i차 메뉴. 건너뛴 차수는 비어 있다."""
+    return {} if is_skipped(prefix(i)) else picks(i)
+
+
+def money_texts() -> tuple[str, str]:
+    if is_skipped("budget"):
+        return UNDECIDED, UNDECIDED
+    return budget_text(), ss.p_pay
+
+
 def summary_lines() -> list[str]:
     today = dt.datetime.now(KST).date()
-    home = ss.home + (f" ({ss.home_wanted}에 가려다 기각 ㅋ)" if ss.home_wanted else "")
+    people, meet, home, wanted = info_texts()
+    if wanted:
+        home += f" ({wanted}에 가려다 기각 ㅋ)"
+    elif is_skipped("info"):
+        home += f" ({SKIPPED_HOME_NOTE})"
+    meet = "만날 시간 미정 🤔" if is_skipped("info") else f"{meet} 만남"
     lines = [
         "🍻 오늘의 주문서 🍻",
-        f"📅 {today.month}/{today.day}({'월화수목금토일'[today.weekday()]}) · 👥 {ss.p_people}명",
-        f"⏰ {meet_text()} 만남 → 🏠 {home}",
+        f"📅 {today.month}/{today.day}({'월화수목금토일'[today.weekday()]}) · 👥 {people}",
+        f"⏰ {meet} → 🏠 {home}",
         "",
     ]
-    for i, kind in enumerate(ss.course):
-        lines.append(f"{i + 1}차 {COURSE_TYPES[kind]} {kind}")
-        if kind == "카페":
-            lines.append(f"  · 컨셉: {ss.get(f'{prefix(i)}_concept')}")
-        for sec, items in picks(i).items():
-            lines.append(f"  · {sec}: {', '.join(items)}")
-    lines += ["", f"💰 1인 {budget_text()} · {ss.p_pay}"]
+    if is_skipped("course") or not ss.course:
+        lines.append(f"🗺️ 코스: {UNDECIDED}")
+    else:
+        for i, kind in enumerate(ss.course):
+            lines.append(f"{i + 1}차 {COURSE_TYPES[kind]} {kind}")
+            items = course_items(i)
+            if not items:
+                lines.append(f"  · {UNDECIDED}")
+                continue
+            if kind == "카페":
+                lines.append(f"  · 컨셉: {ss.get(f'{prefix(i)}_concept')}")
+            for sec, picked in items.items():
+                lines.append(f"  · {sec}: {', '.join(picked)}")
+    budget, pay = money_texts()
+    lines += ["", f"💰 예산·계산: {UNDECIDED}" if is_skipped("budget") else f"💰 1인 {budget} · {pay}"]
     return lines
 
 
@@ -575,11 +633,20 @@ def receipt_html() -> str:
     today = dt.datetime.now(KST)
     rows = []
     n = 0
-    for i, kind in enumerate(ss.course):
+    undecided_row = (
+        f'<div class="row"><span>메뉴</span><span class="fill"></span><span class="price">{UNDECIDED}</span></div>'
+    )
+    if is_skipped("course") or not ss.course:
+        rows.append(f'<div class="sec">🗺️ 코스</div>{undecided_row}')
+    for i, kind in enumerate([] if is_skipped("course") else ss.course):
         rows.append(f'<div class="sec">{i + 1}차 {COURSE_TYPES[kind]} {escape(kind)}</div>')
+        items = course_items(i)
+        if not items:
+            rows.append(undecided_row)
+            continue
         if kind == "카페":
             rows.append(f'<div class="sub">{escape(ss.get(f"{prefix(i)}_concept") or "")}</div>')
-        for sec, items in picks(i).items():
+        for sec, items in items.items():
             for item in items:
                 price = JOKE_PRICES[n % len(JOKE_PRICES)]
                 n += 1
@@ -587,20 +654,23 @@ def receipt_html() -> str:
                     f'<div class="row"><span>{escape(item)}</span><span class="fill"></span>'
                     f'<span class="price">{escape(price)}</span></div>'
                 )
-    home = escape(ss.home) + (f' <span class="small">({escape(ss.home_wanted)} 기각)</span>' if ss.home_wanted else "")
+    people, meet, home, wanted = info_texts()
+    budget, pay = money_texts()
+    note = f"{wanted} 기각" if wanted else SKIPPED_HOME_NOTE if is_skipped("info") else ""
+    home = escape(home) + (f' <span class="small">({escape(note)})</span>' if note else "")
     return f"""
 <div class="receipt">
   <div class="center"><h3>🍻 오늘의 주문서</h3>
   <div class="small">{today:%Y-%m-%d %H:%M} · No.{random.randint(1000, 9999)}</div></div>
   <hr>
-  <div class="row"><span>👥 인원</span><span class="fill"></span><span>{ss.p_people}명</span></div>
-  <div class="row"><span>⏰ 만남</span><span class="fill"></span><span>{escape(meet_text())}</span></div>
+  <div class="row"><span>👥 인원</span><span class="fill"></span><span>{escape(people)}</span></div>
+  <div class="row"><span>⏰ 만남</span><span class="fill"></span><span>{escape(meet)}</span></div>
   <div class="row"><span>🏠 귀가</span><span class="fill"></span><span>{home}</span></div>
   <hr>
   {''.join(rows)}
   <hr>
-  <div class="total"><span>1인 예산</span><span>{escape(budget_text())}</span></div>
-  <div class="total"><span>결제</span><span>{escape(ss.p_pay)}</span></div>
+  <div class="total"><span>1인 예산</span><span>{escape(budget)}</span></div>
+  <div class="total"><span>결제</span><span>{escape(pay)}</span></div>
   <hr>
   <div class="center small">* 환불 불가 · 노쇼 시 다음 판 쏘기 *</div>
   <div class="barcode"></div>
